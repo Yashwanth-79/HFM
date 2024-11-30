@@ -6,6 +6,8 @@ numpy
 plotly
 gTTS
 soundfile
-opencv-python
-opencv-python-headless
+av
+torch
+torch-vision
+threading
 mediapipe
