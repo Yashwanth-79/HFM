@@ -1,18 +1,12 @@
 import streamlit as st
 import cv2
 import numpy as np
+import mediapipe as mp
 import pyautogui
 import time
 
 class GestureMouseController:
     def __init__(self):
-        # Load Haar Cascade Classifier for face detection
-        try:
-            self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        except Exception as e:
-            st.error(f"Error loading Haar Cascade: {e}")
-            self.face_cascade = None
-        
         # Screen dimensions
         self.screen_w, self.screen_h = pyautogui.size()
         
@@ -26,27 +20,37 @@ class GestureMouseController:
         
         # Tracking variables for specific gestures
         self.last_eyebrow_state = False
-        self.last_head_tilt = 0
+        self.last_head_position = None
         self.head_tilt_threshold = 20  # Pixel difference for head tilt
         
         # Gesture control state
         self.gesture_active = False
+        
+        # MediaPipe Face Mesh for more robust facial tracking
+        self.mp_face_mesh = mp.solutions.face_mesh
+        self.face_mesh = self.mp_face_mesh.FaceMesh(
+            static_image_mode=False,
+            max_num_faces=1,
+            min_detection_confidence=0.5
+        )
 
-    def detect_click_gestures(self, face, gray_frame):
+    def detect_click_gestures(self, landmarks, frame_shape):
         """
-        Detect click gestures using facial features
+        Detect click gestures using facial landmarks
         """
         current_time = time.time()
-        (x, y, w, h) = face
+        height, width, _ = frame_shape
         
-        # Region of Interest for eyebrows (upper part of face)
-        eyebrow_roi = gray_frame[y:y+h//3, x:x+w]
+        # Eyebrow raise detection using landmark positions
+        left_eyebrow_points = [105, 63, 190, 52, 25]
+        right_eyebrow_points = [334, 296, 416, 277, 257]
         
-        # Detect eyebrow movement (using intensity variation)
-        eyebrow_intensity = np.mean(eyebrow_roi)
+        # Calculate eyebrow movement
+        left_eyebrow_y = np.mean([landmarks[p].y * height for p in left_eyebrow_points])
+        right_eyebrow_y = np.mean([landmarks[p].y * height for p in right_eyebrow_points])
         
         # Left Click - Eyebrow Raise Detection
-        if eyebrow_intensity > 150:  # Adjust threshold as needed
+        if left_eyebrow_y < height * 0.3:  # Adjust threshold as needed
             if not self.last_eyebrow_state:
                 if current_time - self.last_click_time > self.click_cooldown:
                     try:
@@ -60,20 +64,21 @@ class GestureMouseController:
             self.last_eyebrow_state = False
         
         # Right Click - Head Tilt Detection
-        face_center_x = x + w // 2
-        if abs(face_center_x - self.last_head_tilt) > self.head_tilt_threshold:
-            if current_time - self.last_click_time > self.click_cooldown:
-                try:
-                    pyautogui.rightClick()
-                    st.toast("Head Tilt - Right Click!")
-                    self.last_click_time = current_time
-                except Exception as e:
-                    st.error(f"Right-click error: {e}")
+        head_center_x = landmarks[168].x * width
+        if self.last_head_position is not None:
+            if abs(head_center_x - self.last_head_position) > self.head_tilt_threshold:
+                if current_time - self.last_click_time > self.click_cooldown:
+                    try:
+                        pyautogui.rightClick()
+                        st.toast("Head Tilt - Right Click!")
+                        self.last_click_time = current_time
+                    except Exception as e:
+                        st.error(f"Right-click error: {e}")
         
         # Update last head position
-        self.last_head_tilt = face_center_x
+        self.last_head_position = head_center_x
 
-    def track_head_movement(self, face, frame_shape):
+    def track_head_movement(self, landmarks, frame_shape):
         """
         Track head movement for cursor control with reduced sensitivity
         """
@@ -81,14 +86,14 @@ class GestureMouseController:
             return
         
         try:
-            (x, y, w, h) = face
-            # Use face center as cursor reference
-            nose_x = x + w // 2
-            nose_y = y + h // 2
+            height, width, _ = frame_shape
+            # Use nose landmark for cursor control
+            nose_x = landmarks[1].x * width
+            nose_y = landmarks[1].y * height
             
             # Convert to screen coordinates with more gradual mapping
-            screen_x = np.interp(nose_x, (0, frame_shape[1]), (0, self.screen_w))
-            screen_y = np.interp(nose_y, (0, frame_shape[0]), (0, self.screen_h))
+            screen_x = np.interp(nose_x, (0, width), (0, self.screen_w))
+            screen_y = np.interp(nose_y, (0, height), (0, self.screen_h))
             
             # More aggressive smoothing for slower, more stable cursor movement
             screen_x = (self.prev_x * (self.smoothing-1) + screen_x) / self.smoothing
@@ -109,6 +114,7 @@ def main():
     try:
         import cv2
         import numpy as np
+        import mediapipe
         import pyautogui
     except ImportError as e:
         st.error(f"Required library not found: {e}")
@@ -149,7 +155,7 @@ def main():
     # Streamlit image display
     frame_placeholder = st.empty()
     
-    while True:
+    while gesture_toggle:
         # Read frame
         ret, frame = cap.read()
         
@@ -160,34 +166,27 @@ def main():
         # Flip frame
         frame = cv2.flip(frame, 1)
         
-        # Convert to grayscale for face detection
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # Convert to RGB for MediaPipe
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        # Detect faces
-        try:
-            faces = controller.face_cascade.detectMultiScale(
-                gray, 
-                scaleFactor=1.1, 
-                minNeighbors=5, 
-                minSize=(30, 30)
-            )
-        except Exception as e:
-            st.error(f"Face detection error: {e}")
-            faces = []
+        # Process frame with MediaPipe Face Mesh
+        results = controller.face_mesh.process(rgb_frame)
         
-        if len(faces) > 0 and controller.gesture_active:
-            # Get first face
-            face = faces[0]
+        if results.multi_face_landmarks and controller.gesture_active:
+            # Get first face landmarks
+            face_landmarks = results.multi_face_landmarks[0].landmark
             
             # Detect click gestures
-            controller.detect_click_gestures(face, gray)
+            controller.detect_click_gestures(face_landmarks, frame.shape)
             
             # Track head movement
-            controller.track_head_movement(face, frame.shape)
+            controller.track_head_movement(face_landmarks, frame.shape)
             
-            # Draw face rectangle
-            (x, y, w, h) = face
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            # Draw face landmarks (optional, for visualization)
+            for landmark in face_landmarks:
+                h, w, _ = frame.shape
+                cx, cy = int(landmark.x * w), int(landmark.y * h)
+                cv2.circle(frame, (cx, cy), 1, (0, 255, 0), -1)
         
         # Display frame
         frame_placeholder.image(frame, channels="BGR")
@@ -195,9 +194,8 @@ def main():
         # Small delay
         time.sleep(0.05)
         
-        # Check if user wants to exit
-        if not gesture_toggle:
-            break
+        # Check if checkbox is still checked
+        gesture_toggle = st.session_state.gesture_active
     
     # Release resources
     cap.release()
