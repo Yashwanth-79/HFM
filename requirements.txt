@@ -7,3 +7,4 @@ plotly
 gTTS
 soundfile
 opencv-python
+opencv-python-headless
