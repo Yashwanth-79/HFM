@@ -10,3 +10,4 @@ av
 torch
 torch-vision
 mediapipe
+pyautogui
