@@ -1,5 +1,9 @@
 streamlit
-cv2
+PyPDF2
+pytesseract
+Pillow
 numpy
-pyautogui
-time
+plotly
+gTTS
+soundfile
+opencv-python
