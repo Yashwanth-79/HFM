@@ -3,6 +3,7 @@ import av
 import numpy as np
 import time
 import threading
+import cv2
 
 class MouseController:
     def __init__(self):
@@ -76,7 +77,7 @@ def main():
     st.title("Hands-Free Gesture Control Simulator")
     
     # Compatibility and library checks
-    required_libs = ['streamlit', 'av', 'numpy']
+    required_libs = ['streamlit', 'av', 'numpy', 'opencv-python']
     missing_libs = []
     
     for lib in required_libs:
@@ -109,55 +110,39 @@ def main():
     gesture_toggle = st.checkbox("Activate Gesture Control", key="gesture_active")
     mouse_controller.gesture_active = gesture_toggle
     
-    # Webcam input
-    webcam = st.camera_input("Open Webcam", key="webcam")
+    # Webcam input using OpenCV
+    cap = cv2.VideoCapture(0)
     
-    # Visualization and tracking
-    if webcam is not None and gesture_toggle:
-        # Convert to OpenCV format
-        bytes_data = webcam.getvalue()
-        
+    while gesture_toggle:
+        ret, frame = cap.read()
+        if not ret:
+            continue
+
         try:
-            # Convert bytes to numpy array
-            frame_array = np.frombuffer(bytes_data, np.uint8)
-            frame_array = frame_array.reshape(480, 640, 3)  # Reshape the array to have 3 dimensions
-            
-            # Decode image
-            frame = av.VideoFrame.from_ndarray(frame_array, format="bgr24")
-            frame_np = frame.to_ndarray(format="bgr24")
-            
             # Flip frame
-            frame_np = np.fliplr(frame_np)
-            
+            frame = cv2.flip(frame, 1)
+
             # Detect face center
-            face_center = face_detector.detect_face(frame_np)
-            
+            face_center = face_detector.detect_face(frame)
+
             # Get face region for gesture detection
             x, y = face_center
-            face_region = frame_np[max(0, y-50):min(frame_np.shape[0], y+50), 
-                                   max(0, x-50):min(frame_np.shape[1], x+50)]
-            
+            face_region = frame[max(0, y-50):min(frame.shape[0], y+50),
+                              max(0, x-50):min(frame.shape[1], x+50)]
+
             # Perform gesture detection
             mouse_controller.detect_gestures(face_region)
-            
+
             # Track movement
             mouse_controller.track_movement(face_center)
-            
+
             # Display processed frame
-            st.image(frame_np, channels="BGR", caption="Gesture Detection Preview")
-        
+            st.image(frame, channels="BGR", caption="Gesture Detection Preview")
+
         except Exception as e:
             st.error(f"Frame processing error: {e}")
-    
-    # Additional information
-    with st.expander("ℹ️ About This App"):
-        st.markdown("""
-        ### Gesture Control Simulator
-        - Simulates mouse control using webcam input
-        - Detects gestures based on face region brightness
-        - Provides visual feedback of detected gestures
-        - No external mouse control libraries used
-        """)
+
+    cap.release()
 
 if __name__ == "__main__":
     main()
