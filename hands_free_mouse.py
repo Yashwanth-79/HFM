@@ -120,6 +120,7 @@ def main():
         try:
             # Convert bytes to numpy array
             frame_array = np.frombuffer(bytes_data, np.uint8)
+            frame_array = frame_array.reshape(480, 640, 3)  # Reshape the array to have 3 dimensions
             
             # Decode image
             frame = av.VideoFrame.from_ndarray(frame_array, format="bgr24")
