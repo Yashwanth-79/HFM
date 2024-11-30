@@ -11,3 +11,4 @@ torch
 torch-vision
 mediapipe
 pyautogui
+opencv-python
