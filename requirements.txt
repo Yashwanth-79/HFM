@@ -9,5 +9,4 @@ soundfile
 av
 torch
 torch-vision
-threading
 mediapipe
